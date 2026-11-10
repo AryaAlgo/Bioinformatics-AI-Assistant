@@ -48,6 +48,7 @@ Bioinformatics-AI-Assistant/
 │       │   └── dna_analyzer_v6.py
 │       └── results/
 ├── requirements.txt
+├── run.sh
 ├── README.md
 ├── LICENSE
 └── .gitignore
@@ -121,7 +122,7 @@ If Ollama is already running as a system service, this step is unnecessary.
 ### 7. Start the AI assistant
 
 ```bash
-python app/local_ai_chat_v3_fixed.py
+./run.sh
 ```
 
 Open http://127.0.0.1:8083 in your browser on the same machine.
