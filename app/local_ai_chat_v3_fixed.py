@@ -7,6 +7,8 @@ import json
 import time
 import traceback
 
+from app.bioinformatics_engine import analyze_dna_sequence
+
 HOST = "127.0.0.1"
 PORT = 8083
 
@@ -16,23 +18,67 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 TIMEOUT = 600
 
 SYSTEM_PROMPT = """
-You are an offline bioinformatics and Python assistant.
+You are a careful Python and bioinformatics assistant.
 
-Environment:
-Python 3.8.10
-Biopython 1.83
-NumPy 1.24.4
-Ubuntu 20.04
+ENVIRONMENT
+- Python 3.8.10
+- Biopython 1.83
+- NumPy 1.24.4
+- Ubuntu 20.04
 
-Use correct Biopython imports and APIs.
-Use from Bio import SeqIO.
-Use Bio.Seq for sequence operations.
-Use transcribe() for RNA transcription.
-Use translate() for protein translation.
-Use reverse_complement() for reverse complement.
-Never invent APIs.
-Write complete Python programs when requested.
-Explain biological assumptions.
+BIOLOGICAL RULES
+1. DNA transcription converts DNA into RNA. It is NOT translation.
+2. RNA transcription replaces T with U in the corresponding sequence.
+3. Translation converts nucleotide codons into amino acids.
+4. DNA reverse complement means complementing the bases and then reversing the sequence.
+5. DNA base pairing: A-T and G-C.
+6. RNA base pairing: A-U and G-C.
+7. GC percentage = ((G + C) / total valid A,T,G,C bases) * 100.
+8. Never calculate GC percentage using only G or using a protein sequence.
+9. Distinguish DNA, RNA and protein sequences clearly.
+10. Explain reading frames and incomplete codons when relevant.
+11. Do not assume every sequence begins with a start codon.
+12. Ambiguous nucleotide symbols must not be silently treated as A, T, G or C.
+
+BIOPYTHON API RULES
+- Use from Bio.Seq import Seq for sequence operations.
+- Use from Bio import SeqIO for FASTA and other supported sequence files.
+- Use Seq.transcribe() for DNA-to-RNA transcription.
+- Use Seq.translate() for nucleotide-to-protein translation.
+- Use Seq.reverse_complement() for DNA reverse complement.
+- Use len(sequence) for sequence length.
+- Use sequence.count("A"), sequence.count("T"),
+  sequence.count("G") and sequence.count("C") for base counts.
+- Do not invent imports, classes, functions or methods.
+- Do not confuse reverse complement, transcription and translation.
+
+PYTHON CODE RULES
+- Write code compatible with Python 3.8.10.
+- Provide complete runnable programs when requested.
+- Include necessary imports.
+- Use meaningful variable names.
+- Handle empty sequences and invalid input when relevant.
+- Do not claim code was executed unless it was actually executed.
+- Explain important calculations and expected output.
+- If uncertain about an API, say so instead of inventing one.
+
+SCIENTIFIC ACCURACY
+- Check biological definitions before answering.
+- Show calculation steps for numerical answers.
+- Verify that reported counts add up to the sequence length.
+- State assumptions about sequence orientation, reading frame and genetic code.
+- Clearly distinguish established facts from assumptions.
+- Never invent experimental results or biological interpretations.
+- Recommend independent validation for scientific conclusions.
+
+RESPONSE STYLE
+- Use clear, simple scientific language.
+- Explain concepts step by step.
+- Use examples where helpful.
+- Correctly label DNA, RNA and protein outputs.
+- Admit uncertainty rather than provide a confident but unsupported answer.
+
+Your priority is biological correctness, valid Python code and honest explanations.
 """
 
 HTML = r"""
@@ -103,6 +149,13 @@ button {
 button:disabled {
     opacity: 0.5;
 }
+select {
+    padding: 12px;
+    background: #1f2937;
+    color: white;
+    border: 1px solid #4b5563;
+    border-radius: 8px;
+}
 #status {
     text-align: center;
     padding: 10px;
@@ -127,6 +180,10 @@ Welcome! Ask your bioinformatics question.
 <div id="status">Connected to local interface</div>
 
 <div id="input-area">
+<select id="mode" onchange="updateMode()">
+<option value="chat">AI Chat</option>
+<option value="dna">DNA Analysis</option>
+</select>
 <textarea id="question" rows="3"
 placeholder="Ask your question..."></textarea>
 <button id="send" onclick="sendMessage()">Send</button>
@@ -145,6 +202,20 @@ function addMessage(text, type) {
     div.scrollIntoView({behavior: "smooth"});
 }
 
+function updateMode() {
+    let mode = document.getElementById("mode").value;
+    let input = document.getElementById("question");
+    let status = document.getElementById("status");
+
+    if (mode === "dna") {
+        input.placeholder = "Paste your DNA sequence here...";
+        status.textContent = "DNA Analysis | Biopython engine";
+    } else {
+        input.placeholder = "Ask your bioinformatics question...";
+        status.textContent = "Connected to local interface";
+    }
+}
+
 async function sendMessage() {
 
     if (busy) return;
@@ -154,6 +225,7 @@ async function sendMessage() {
     let status = document.getElementById("status");
 
     let question = input.value.trim();
+    let isDNA = document.getElementById("mode").value === "dna";
 
     if (!question) return;
 
@@ -162,13 +234,17 @@ async function sendMessage() {
 
     addMessage(question, "user");
 
-    messages.push({
-        role: "user",
-        content: question
-    });
+    if (!isDNA) {
+        messages.push({
+            role: "user",
+            content: question
+        });
+    }
 
     input.value = "";
-    status.textContent = "Qwen is thinking...";
+    status.textContent = isDNA
+        ? "Analyzing with Biopython..."
+        : "Qwen is thinking...";
 
     let timer;
 
@@ -177,6 +253,55 @@ async function sendMessage() {
         const controller = new AbortController();
 
         timer = setTimeout(() => controller.abort(), 600000);
+
+        if (isDNA) {
+            const response = await fetch("/api/analyze-dna", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({sequence: question}),
+                signal: controller.signal
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "DNA analysis failed");
+            }
+
+            const r = data.result;
+
+            let gcText = r.GC_percentage === null
+                ? "Not defined (no canonical bases)"
+                : r.GC_percentage.toFixed(2) + "%";
+
+            let answer =
+                "DNA SEQUENCE ANALYSIS REPORT\n" +
+                "================================\n\n" +
+                "1. SEQUENCE INFORMATION\n" +
+                "Sequence length : " + r.sequence_length + " bp\n" +
+                "GC content      : " + gcText + "\n\n" +
+                "2. NUCLEOTIDE COUNTS\n" +
+                "A : " + r.A + "\n" +
+                "T : " + r.T + "\n" +
+                "G : " + r.G + "\n" +
+                "C : " + r.C + "\n" +
+                "Total canonical bases : " +
+                    (r.A + r.T + r.G + r.C) + "\n\n" +
+                "3. SEQUENCE TRANSFORMATIONS\n" +
+                "Reverse complement:\n" + r.reverse_complement + "\n\n" +
+                "RNA transcript:\n" + r.RNA + "\n\n" +
+                "4. PROTEIN TRANSLATION\n" +
+                "Reading frame : 0 (first nucleotide)\n" +
+                "Protein       : " + r.protein_frame_0 + "\n" +
+                "Incomplete trailing bases : " +
+                    r.incomplete_trailing_bases + "\n\n" +
+                "Note: Translation uses complete codons in frame 0. " +
+                "Incomplete trailing bases are excluded.";
+
+            addMessage(answer, "ai");
+            status.textContent = "DNA Analysis completed | Biopython";
+            return;
+        }
 
         const response = await fetch("/api/chat", {
             method: "POST",
@@ -204,7 +329,9 @@ async function sendMessage() {
 
     } catch (error) {
 
-        messages.pop();
+        if (!isDNA) {
+            messages.pop();
+        }
 
         let message = error.name === "AbortError"
             ? "Request timed out after 10 minutes."
@@ -262,6 +389,33 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self):
+
+        if self.path == "/api/analyze-dna":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+
+                if length <= 0 or length > 1000000:
+                    self.send_json({"error": "Invalid request size."}, 413)
+                    return
+
+                data = json.loads(
+                    self.rfile.read(length).decode("utf-8")
+                )
+
+                result = analyze_dna_sequence(data.get("sequence", ""))
+
+                self.send_json({"result": result})
+                return
+
+            except (ValueError, TypeError) as error:
+                self.send_json({"error": str(error)}, 400)
+                return
+
+            except Exception as error:
+                print("[DNA ANALYSIS] Error:", repr(error), flush=True)
+                traceback.print_exc()
+                self.send_json({"error": "DNA analysis failed."}, 500)
+                return
 
         if self.path != "/api/chat":
             self.send_error(404)
