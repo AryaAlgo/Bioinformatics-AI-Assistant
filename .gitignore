@@ -218,3 +218,35 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local Python environments
+bioenv/
+venv/
+env/
+
+# Local model files
+*.gguf
+*.safetensors
+*.bin
+
+# Offline installation packages
+/packages/
+
+# Backup archives
+backups/
+Backups/
+*.tar
+*.tar.gz
+
+# Sensitive configuration
+.env
+*.pem
+*.key
+
+# Temporary and local files
+*.log
+.DS_Store
+
+# Local databases
+*.sqlite3
+*.db
